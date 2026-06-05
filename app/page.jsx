@@ -228,7 +228,11 @@ export default function Page() {
 
       <header className="ps-header app">
         <button className="ps-burger" onClick={() => setSidebarOpen(true)} aria-label="Menu">
-          <span /><span /><span />
+          <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">
+            <line x1="1" y1="1" x2="17" y2="1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <line x1="1" y1="7" x2="17" y2="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <line x1="1" y1="13" x2="17" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </button>
         <Logo onClick={newJob} />
         <button className="ps-ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
@@ -398,8 +402,8 @@ const CSS = `
 .ps-header.app { gap:14px; }
 .ps-tag { font-size:13px; color:var(--soft); }
 
-.ps-burger { display:flex; flex-direction:column; justify-content:center; gap:4px; width:38px; height:38px; border:1px solid var(--line); background:var(--paper); border-radius:10px; cursor:pointer; padding:0 9px; }
-.ps-burger span { display:block; height:2px; background:var(--ink); border-radius:2px; }
+.ps-burger { display:flex; align-items:center; justify-content:center; width:38px; height:38px; border:1px solid var(--line); background:var(--paper); border-radius:10px; cursor:pointer; color:var(--ink); padding:0; }
+.ps-burger:hover { background:var(--cream); }
 
 .ps-logo { display:flex; align-items:center; gap:10px; background:none; border:none; cursor:pointer; padding:0; font-family:inherit; }
 .ps-logo-badge { flex:none; width:34px; height:34px; border-radius:9px; background:var(--accent); color:#fff;
