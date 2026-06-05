@@ -19,8 +19,29 @@ async function post(url, body) {
   return { ok: res.ok, status: res.status, data };
 }
 
+function relTime(iso) {
+  if (!iso) return "";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+
+function Logo({ onClick }) {
+  return (
+    <button className="ps-logo" onClick={onClick} title="New job">
+      <span className="ps-logo-badge">AP</span>
+      <span className="ps-logo-text">
+        <span className="ps-logo-word">PrepStar</span>
+        <span className="ps-logo-sub">by analystandpm</span>
+      </span>
+    </button>
+  );
+}
+
 export default function Page() {
-  const [session, setSession] = useState(undefined); // undefined = loading
+  const [session, setSession] = useState(undefined);
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
 
@@ -39,11 +60,37 @@ export default function Page() {
   const [critiques, setCritiques] = useState({});
   const [loadingCritique, setLoadingCritique] = useState(null);
 
+  // history
+  const [sheets, setSheets] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentSheetId, setCurrentSheetId] = useState(null);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (session) fetchSheets();
+  }, [session]);
+
+  async function fetchSheets() {
+    try {
+      const res = await fetch("/api/sheets");
+      const data = await res.json();
+      if (res.ok) setSheets(data.sheets || []);
+    } catch {}
+  }
+
+  async function savePayload(payload) {
+    try {
+      const { data } = await post("/api/sheets", payload);
+      return data?.id || payload.id || null;
+    } catch {
+      return payload.id || null;
+    }
+  }
 
   async function signIn() {
     if (!email.includes("@")) return;
@@ -77,8 +124,18 @@ export default function Page() {
       setView("input");
       return;
     }
-    setQuestions(data.questions || []);
+    const qs = data.questions || [];
+    setQuestions(qs);
+    setAnswers({});
+    setCritiques({});
+    setDrafts({});
+    setOpen(null);
     setView("results");
+    const id = await savePayload({
+      title: jobTitle, seniority, jd, questions: qs, answers: {}, critiques: {},
+    });
+    setCurrentSheetId(id);
+    fetchSheets();
   }
 
   async function buildAnswer(idx) {
@@ -91,8 +148,10 @@ export default function Page() {
     const { data } = await post("/api/answer", {
       jobTitle, seniority, jd, question: questions[idx].question,
     });
-    setAnswers((a) => ({ ...a, [idx]: data }));
+    const newAnswers = { ...answers, [idx]: data };
+    setAnswers(newAnswers);
     setLoadingAnswer(null);
+    savePayload({ id: currentSheetId, title: jobTitle, seniority, jd, questions, answers: newAnswers, critiques });
   }
 
   async function critique(idx) {
@@ -102,17 +161,35 @@ export default function Page() {
     const { data } = await post("/api/critique", {
       jobTitle, seniority, question: questions[idx].question, draft,
     });
-    setCritiques((c) => ({ ...c, [idx]: data }));
+    const newCritiques = { ...critiques, [idx]: data };
+    setCritiques(newCritiques);
     setLoadingCritique(null);
+    savePayload({ id: currentSheetId, title: jobTitle, seniority, jd, questions, answers, critiques: newCritiques });
   }
 
-  function reset() {
+  function newJob() {
+    setCurrentSheetId(null);
     setView("input");
-    setQuestions([]); setAnswers({}); setDrafts({}); setCritiques({});
-    setOpen(null); setJd(""); setJobTitle("");
+    setQuestions([]); setAnswers({}); setCritiques({}); setDrafts({}); setOpen(null);
+    setJobTitle(""); setJd(""); setSeniority("Mid");
+    setError("");
+    setSidebarOpen(false);
   }
 
-  // ---- Auth gate ----
+  function openSheet(s) {
+    setCurrentSheetId(s.id);
+    setJobTitle(s.title || "");
+    setSeniority(s.seniority || "Mid");
+    setJd(s.jd || "");
+    setQuestions(s.questions || []);
+    setAnswers(s.answers || {});
+    setCritiques(s.critiques || {});
+    setDrafts({});
+    setOpen(null);
+    setView("results");
+    setSidebarOpen(false);
+  }
+
   if (session === undefined) {
     return <div className="ps-root"><style>{CSS}</style><div className="ps-loading"><div className="ps-spinner">✦</div></div></div>;
   }
@@ -122,7 +199,7 @@ export default function Page() {
       <div className="ps-root">
         <style>{CSS}</style>
         <header className="ps-header">
-          <div className="ps-brand"><span className="ps-star">✦</span> PrepStar</div>
+          <Logo onClick={() => {}} />
           <div className="ps-tag">Interview answers, tailored to the job.</div>
         </header>
         <main className="ps-main">
@@ -145,14 +222,39 @@ export default function Page() {
     );
   }
 
-  // ---- Signed-in app ----
   return (
     <div className="ps-root">
       <style>{CSS}</style>
-      <header className="ps-header">
-        <div className="ps-brand"><span className="ps-star">✦</span> PrepStar</div>
+
+      <header className="ps-header app">
+        <button className="ps-burger" onClick={() => setSidebarOpen(true)} aria-label="Menu">
+          <span /><span /><span />
+        </button>
+        <Logo onClick={newJob} />
         <button className="ps-ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>
+
+      {sidebarOpen && <div className="ps-scrim" onClick={() => setSidebarOpen(false)} />}
+      <aside className={"ps-sidebar" + (sidebarOpen ? " open" : "")}>
+        <div className="ps-sidebar-head">
+          <span>Your jobs</span>
+          <button className="ps-x" onClick={() => setSidebarOpen(false)}>×</button>
+        </div>
+        <button className="ps-newjob" onClick={newJob}>+ New job</button>
+        <div className="ps-history">
+          {sheets.length === 0 && <div className="ps-empty">No saved jobs yet. Build one and it'll appear here.</div>}
+          {sheets.map((s) => (
+            <button
+              key={s.id}
+              className={"ps-histitem" + (s.id === currentSheetId ? " on" : "")}
+              onClick={() => openSheet(s)}
+            >
+              <span className="ps-histtitle">{s.title || "Untitled role"}</span>
+              <span className="ps-histmeta">{s.seniority || ""} · {relTime(s.created_at)}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
 
       {view === "input" && (
         <main className="ps-main">
@@ -196,7 +298,7 @@ export default function Page() {
               <h2>{jobTitle}</h2>
               <span className="ps-meta">{seniority} · {questions.length} likely questions</span>
             </div>
-            <button className="ps-ghost" onClick={reset}>+ New job</button>
+            <button className="ps-ghost" onClick={newJob}>+ New job</button>
           </div>
           <div className="ps-qlist">
             {questions.map((q, idx) => (
@@ -209,7 +311,9 @@ export default function Page() {
                 </button>
                 {open === idx && (
                   <div className="ps-qbody">
-                    {loadingAnswer === idx && <div className="ps-mini">Building your scaffold…</div>}
+                    {loadingAnswer === idx && (
+                      <div className="ps-building"><span className="ps-dot" /> Claude is writing your answer…</div>
+                    )}
                     {answers[idx] && !answers[idx].error && (
                       <>
                         <div className="ps-approach">{answers[idx].approach}</div>
@@ -289,10 +393,21 @@ const CSS = `
   font-family:'Hanken Grotesk',sans-serif; color:var(--ink); background:var(--cream);
   background-image:radial-gradient(var(--line) 0.5px, transparent 0.5px); background-size:22px 22px; min-height:100vh; padding-bottom:40px; }
 .ps-root * { box-sizing:border-box; }
-.ps-header { display:flex; align-items:center; justify-content:space-between; padding:22px 28px; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:8px; }
-.ps-brand { font-family:'Fraunces',serif; font-size:24px; font-weight:600; letter-spacing:-0.5px; }
-.ps-star { color:var(--accent); }
+
+.ps-header { display:flex; align-items:center; justify-content:space-between; padding:18px 24px; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:10px; }
+.ps-header.app { gap:14px; }
 .ps-tag { font-size:13px; color:var(--soft); }
+
+.ps-burger { display:flex; flex-direction:column; justify-content:center; gap:4px; width:38px; height:38px; border:1px solid var(--line); background:var(--paper); border-radius:10px; cursor:pointer; padding:0 9px; }
+.ps-burger span { display:block; height:2px; background:var(--ink); border-radius:2px; }
+
+.ps-logo { display:flex; align-items:center; gap:10px; background:none; border:none; cursor:pointer; padding:0; font-family:inherit; }
+.ps-logo-badge { flex:none; width:34px; height:34px; border-radius:9px; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-family:'Fraunces',serif; font-weight:600; font-size:15px; letter-spacing:0.5px; }
+.ps-logo-text { display:flex; flex-direction:column; align-items:flex-start; line-height:1; }
+.ps-logo-word { font-family:'Fraunces',serif; font-size:21px; font-weight:600; letter-spacing:-0.5px; }
+.ps-logo-sub { font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:1.5px; color:var(--soft); margin-top:3px; }
+
 .ps-main { max-width:760px; margin:0 auto; padding:36px 24px; }
 .ps-kicker { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:2px; color:var(--accent); margin-bottom:14px; }
 .ps-hero h1 { font-family:'Fraunces',serif; font-weight:600; font-size:46px; line-height:1.02; letter-spacing:-1px; margin:0 0 18px; }
@@ -314,14 +429,21 @@ const CSS = `
 .ps-cta.sm { width:auto; padding:11px 18px; font-size:14px; margin-top:12px; }
 .ps-cta:disabled { opacity:.6; cursor:default; }
 .ps-error { color:var(--accent); font-size:14px; margin-top:14px; }
+
 .ps-loading { text-align:center; padding:90px 24px; color:var(--soft); }
 .ps-spinner { font-size:40px; color:var(--accent); animation:spin 1.4s linear infinite; display:inline-block; }
 @keyframes spin { to { transform:rotate(360deg); } }
+
+.ps-building { display:flex; align-items:center; gap:10px; padding:16px 0; color:var(--accent); font-size:14px; font-weight:500; }
+.ps-dot { width:10px; height:10px; border-radius:50%; background:var(--accent); animation:pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:.3; transform:scale(.8);} 50% { opacity:1; transform:scale(1.2);} }
+
 .ps-results-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:28px; flex-wrap:wrap; }
 .ps-results-head h2 { font-family:'Fraunces',serif; font-size:30px; font-weight:600; margin:0 0 4px; letter-spacing:-0.5px; }
 .ps-meta { font-size:13px; color:var(--soft); }
 .ps-ghost { background:none; border:1px solid var(--line); color:var(--soft); border-radius:999px; padding:9px 16px; font-family:inherit; font-size:14px; cursor:pointer; }
 .ps-ghost:hover { border-color:var(--ink); color:var(--ink); }
+
 .ps-qlist { display:flex; flex-direction:column; gap:12px; }
 .ps-qcard { background:var(--paper); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
 .ps-qhead { width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:18px 20px; display:grid; grid-template-columns:1fr auto; grid-template-areas:"cat chev" "q chev" "why chev"; gap:4px 12px; font-family:inherit; }
@@ -350,6 +472,24 @@ const CSS = `
 .ps-fbblock ul { margin:0; padding-left:16px; }
 .ps-fbblock li { font-size:13.5px; color:var(--soft); line-height:1.45; margin-bottom:2px; }
 .ps-fbblock p { font-size:14px; line-height:1.5; margin:0; }
+
+.ps-scrim { position:fixed; inset:0; background:rgba(28,27,23,0.4); z-index:40; }
+.ps-sidebar { position:fixed; top:0; left:0; height:100%; width:300px; max-width:84vw; background:var(--paper);
+  border-right:1px solid var(--line); z-index:45; transform:translateX(-100%); transition:transform .22s ease;
+  display:flex; flex-direction:column; padding:18px; }
+.ps-sidebar.open { transform:translateX(0); box-shadow:4px 0 24px rgba(0,0,0,0.08); }
+.ps-sidebar-head { display:flex; justify-content:space-between; align-items:center; font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:1.5px; color:var(--soft); margin-bottom:14px; }
+.ps-x { background:none; border:none; font-size:24px; line-height:1; color:var(--soft); cursor:pointer; padding:0 4px; }
+.ps-newjob { width:100%; background:var(--ink); color:var(--cream); border:none; border-radius:10px; padding:12px; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; margin-bottom:16px; }
+.ps-newjob:hover { background:#000; }
+.ps-history { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+.ps-empty { font-size:13px; color:var(--soft); line-height:1.5; padding:8px 4px; }
+.ps-histitem { text-align:left; background:none; border:1px solid transparent; border-radius:10px; padding:11px 12px; cursor:pointer; display:flex; flex-direction:column; gap:3px; font-family:inherit; }
+.ps-histitem:hover { background:var(--cream); }
+.ps-histitem.on { background:var(--cream); border-color:var(--line); }
+.ps-histtitle { font-size:14.5px; font-weight:600; color:var(--ink); line-height:1.3; }
+.ps-histmeta { font-size:11px; color:var(--soft); font-family:'JetBrains Mono',monospace; letter-spacing:0.5px; }
+
 .ps-overlay { position:fixed; inset:0; background:rgba(28,27,23,0.55); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:24px; z-index:50; }
 .ps-paywall { background:var(--paper); border-radius:18px; padding:34px; max-width:380px; text-align:center; border:1px solid var(--line); }
 .ps-paywall h3 { font-family:'Fraunces',serif; font-size:26px; font-weight:600; margin:6px 0 14px; }
@@ -360,5 +500,5 @@ const CSS = `
 .ps-plist li:before { content:"✦"; color:var(--accent); position:absolute; left:0; }
 .ps-paywall .ps-ghost { margin-top:10px; width:100%; }
 .ps-footer { text-align:center; font-size:12px; color:var(--soft); margin-top:40px; font-family:'JetBrains Mono',monospace; letter-spacing:1px; }
-@media (max-width:560px) { .ps-hero h1 { font-size:36px; } .ps-header { padding:18px; } .ps-main { padding:26px 18px; } }
+@media (max-width:560px) { .ps-hero h1 { font-size:36px; } .ps-header { padding:16px; } .ps-main { padding:26px 18px; } .ps-logo-sub { display:none; } }
 `;
